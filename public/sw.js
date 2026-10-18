@@ -12,6 +12,8 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return
+  const requestUrl = new URL(event.request.url)
+  if (requestUrl.pathname.startsWith('/api') || requestUrl.pathname.startsWith('/socket.io')) return
   event.respondWith(fetch(event.request).then((response) => {
     const copy = response.clone()
     caches.open(CACHE).then((cache) => cache.put(event.request, copy))

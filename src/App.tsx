@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useMemo, useState } from 'react'
+import { FormEvent, ReactNode, useEffect, useMemo, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -55,7 +55,7 @@ function stageColor(stage: Stage) {
 }
 
 function App() {
-  const { applications, activities, hydrated, initialize, theme, setTheme, addApplication, updateApplication, moveApplication, deleteApplication, resetDemo, replaceApplications, replaceActivities } = useAppStore()
+  const { applications, activities, hydrated, authStatus, user, authError, initialize, login, register, logout, theme, setTheme, addApplication, updateApplication, moveApplication, deleteApplication, resetDemo, replaceApplications, replaceActivities } = useAppStore()
   const [view, setView] = useState<View>('dashboard')
   const [modal, setModal] = useState<Modal>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -75,10 +75,22 @@ function App() {
 
   useEffect(() => {
     const unsubscribe = subscribeToSync((payload) => {
-      if (payload?.applications && payload?.activities) {
+      if ('applications' in payload && 'activities' in payload) {
         replaceApplications(payload.applications)
         replaceActivities(payload.activities)
       }
+      if ('kind' in payload && payload.kind === 'upsert') {
+        const state = useAppStore.getState()
+        const next = state.applications.some((application) => application.id === payload.application.id)
+          ? state.applications.map((application) => application.id === payload.application.id ? payload.application : application)
+          : [payload.application, ...state.applications]
+        replaceApplications(next)
+        if (payload.activity) {
+          const activitiesWithoutDuplicate = state.activities.filter((activity) => !(activity.applicationId === payload.activity?.applicationId && activity.text === payload.activity?.text))
+          replaceActivities([payload.activity, ...activitiesWithoutDuplicate])
+        }
+      }
+      if ('kind' in payload && payload.kind === 'delete') replaceApplications(useAppStore.getState().applications.filter((application) => application.id !== payload.applicationId))
     })
     const onStorage = (event: StorageEvent) => {
       if (event.key === 'applytrack-applications' && event.newValue) {
@@ -137,10 +149,11 @@ function App() {
   }
 
   if (!hydrated) return <LoadingScreen />
+  if (authStatus === 'unauthenticated' || authStatus === 'error') return <AuthScreen mode={authStatus === 'error' ? 'error' : 'login'} initialError={authError} onLogin={login} onRegister={register} />
 
   return (
     <div className="app-shell">
-      <Sidebar view={view} setView={setView} openCreate={openCreate} applicationCount={applications.length} open={sidebarOpen} close={() => setSidebarOpen(false)} />
+      <Sidebar view={view} setView={setView} openCreate={openCreate} applicationCount={applications.length} user={user} onLogout={logout} open={sidebarOpen} close={() => setSidebarOpen(false)} />
       <main className="main-shell">
         <header className="topbar">
           <button className="mobile-menu icon-button" aria-label="Open navigation" onClick={() => setSidebarOpen(true)}><Menu size={19} /></button>
@@ -153,7 +166,7 @@ function App() {
         </header>
 
         <div className="page-content">
-          {view === 'dashboard' && <Dashboard applications={filteredApplications} activities={activities} counts={counts} activeApplications={activeApplications} onCreate={openCreate} onSelect={openApplication} onMove={handleMove} onViewAll={() => setView('applications')} draggedId={draggedId} setDraggedId={setDraggedId} />}
+          {view === 'dashboard' && <Dashboard applications={filteredApplications} activities={activities} userName={user?.name ?? 'Jordan'} counts={counts} activeApplications={activeApplications} onCreate={openCreate} onSelect={openApplication} onMove={handleMove} onViewAll={() => setView('applications')} draggedId={draggedId} setDraggedId={setDraggedId} />}
           {view === 'applications' && <ApplicationsView applications={filteredApplications} allApplications={applications} search={search} setSearch={setSearch} stageFilter={stageFilter} setStageFilter={setStageFilter} layout={layout} setLayout={setLayout} onCreate={openCreate} onSelect={openApplication} onMove={handleMove} onDelete={handleDelete} draggedId={draggedId} setDraggedId={setDraggedId} />}
           {view === 'insights' && <Insights applications={applications} counts={counts} />}
           {view === 'settings' && <Settings theme={theme} setTheme={setTheme} onReset={async () => { await resetDemo(); notify('Demo data restored') }} />}
@@ -171,9 +184,28 @@ function LoadingScreen() {
   return <div className="loading-screen"><div className="brand-mark">✓</div><span>Loading your workspace…</span></div>
 }
 
-type SidebarProps = { view: View; setView: (view: View) => void; openCreate: () => void; applicationCount: number; open: boolean; close: () => void }
+function AuthScreen({ mode, initialError, onLogin, onRegister }: { mode: 'login' | 'error'; initialError: string | null; onLogin: (email: string, password: string) => Promise<void>; onRegister: (name: string, email: string, password: string) => Promise<void> }) {
+  const [registerMode, setRegisterMode] = useState(false)
+  const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState(initialError ?? '')
+  const [busy, setBusy] = useState(false)
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    setError('')
+    if (registerMode && name.trim().length < 2) return setError('Enter your name to create an account.')
+    if (!email.includes('@')) return setError('Enter a valid email address.')
+    if (password.length < 8) return setError('Password must be at least 8 characters.')
+    setBusy(true)
+    try { registerMode ? await onRegister(name.trim(), email.trim(), password) : await onLogin(email.trim(), password) } catch (authError) { setError(authError instanceof Error ? authError.message : 'Unable to sign in.') } finally { setBusy(false) }
+  }
+  return <div className="auth-shell"><div className="auth-aside"><div className="brand auth-brand"><div className="brand-mark">✓</div><div><strong>apply<span>track</span></strong><small>job search, in focus</small></div></div><div className="auth-quote"><Sparkles size={19} /><h2>A calmer search starts with a clearer next step.</h2><p>Keep every opportunity, conversation, and follow-up in one focused workspace.</p></div><div className="auth-aside-footer"><CheckCircle2 size={15} /> Your workspace is private by default</div></div><section className="auth-card-wrap"><div className="auth-card"><div className="auth-card-header"><span className="eyebrow">Welcome to ApplyTrack</span><h1>{registerMode ? 'Create your workspace' : 'Welcome back'}</h1><p>{registerMode ? 'Start turning your search into momentum.' : 'Sign in to pick up where you left off.'}</p></div>{mode === 'error' && <div className="auth-error"><WifiOff size={15} />{initialError || 'The workspace server is unavailable. Start the API or try again.'}</div>}<form onSubmit={(event) => void submit(event)}>{registerMode && <label className="auth-field"><span>Your name</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="Jordan Davis" autoComplete="name" /></label>}<label className="auth-field"><span>Email address</span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" /></label><label className="auth-field"><span>Password</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="8+ characters" autoComplete={registerMode ? 'new-password' : 'current-password'} /></label>{error && mode !== 'error' && <div className="auth-error"><CircleAlert size={15} />{error}</div>}<button className="primary-button auth-submit" type="submit" disabled={busy}>{busy ? 'Please wait…' : registerMode ? 'Create account' : 'Sign in'} <ArrowRight size={15} /></button></form><button className="auth-switch" onClick={() => { setRegisterMode((value) => !value); setError('') }}>{registerMode ? 'Already have an account? Sign in' : 'New to ApplyTrack? Create an account'}</button></div></section></div>
+}
 
-function Sidebar({ view, setView, openCreate, applicationCount, open, close }: SidebarProps) {
+type SidebarProps = { view: View; setView: (view: View) => void; openCreate: () => void; applicationCount: number; user: { name: string; email: string } | null; onLogout: () => Promise<void>; open: boolean; close: () => void }
+
+function Sidebar({ view, setView, openCreate, applicationCount, user, onLogout, open, close }: SidebarProps) {
   const navItems: Array<{ id: View; label: string; icon: typeof LayoutDashboard; badge?: string }> = [
     { id: 'dashboard', label: 'Overview', icon: LayoutDashboard },
     { id: 'applications', label: 'Applications', icon: BriefcaseBusiness, badge: String(applicationCount) },
@@ -192,7 +224,7 @@ function Sidebar({ view, setView, openCreate, applicationCount, open, close }: S
       </nav>
       <div className="sidebar-bottom">
         <div className="sync-card"><div className="sync-icon"><Zap size={15} /></div><div><strong>All changes synced</strong><small>Saved locally · just now</small></div><Check size={15} className="sync-check" /></div>
-        <div className="profile"><div className="profile-avatar">JD</div><div><strong>Jordan Davis</strong><small>Product designer</small></div><button className="icon-button" aria-label="Sign out"><LogOut size={16} /></button></div>
+        <div className="profile"><div className="profile-avatar">{initials(user?.name ?? 'Jordan Davis')}</div><div><strong>{user?.name ?? 'Jordan Davis'}</strong><small>{user?.email ?? 'Product designer'}</small></div><button className="icon-button" aria-label="Sign out" onClick={() => void onLogout()}><LogOut size={16} /></button></div>
       </div>
     </aside>
   </>
@@ -206,12 +238,12 @@ type BoardProps = {
   setDraggedId: (id: string | null) => void
 }
 
-function Dashboard({ applications, activities, counts, activeApplications, onCreate, onSelect, onMove, onViewAll, draggedId, setDraggedId }: BoardProps & { activities: ActivityEvent[]; counts: Record<Stage, number>; activeApplications: Application[]; onCreate: () => void; onViewAll: () => void }) {
+function Dashboard({ applications, activities, userName, counts, activeApplications, onCreate, onSelect, onMove, onViewAll, draggedId, setDraggedId }: BoardProps & { activities: ActivityEvent[]; userName: string; counts: Record<Stage, number>; activeApplications: Application[]; onCreate: () => void; onViewAll: () => void }) {
   const next = [...applications].filter((app) => app.stage !== 'rejected' && app.nextActionDate).sort((a, b) => (a.nextActionDate ?? '').localeCompare(b.nextActionDate ?? ''))[0]
   const interviewCount = applications.filter((app) => app.stage === 'interview').length
   return <>
     <section className="page-heading dashboard-heading">
-      <div><p className="eyebrow">{formatLongDate(today)} <span className="live-dot" /> Live workspace</p><h1>Good morning, Jordan <span className="wave">✦</span></h1><p className="subtitle">A clear view of your search, so you can focus on the next right move.</p></div>
+      <div><p className="eyebrow">{formatLongDate(today)} <span className="live-dot" /> Live workspace</p><h1>Good morning, {userName} <span className="wave">✦</span></h1><p className="subtitle">A clear view of your search, so you can focus on the next right move.</p></div>
       <button className="primary-button" onClick={onCreate}><Plus size={17} /> Add application</button>
     </section>
     <div className="stat-grid">

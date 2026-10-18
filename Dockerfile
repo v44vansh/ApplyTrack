@@ -3,6 +3,6 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN apk add --no-cache make && npm ci
 COPY . .
-RUN npm run build
-EXPOSE 4173
-CMD ["npm", "run", "preview", "--", "--host", "0.0.0.0"]
+RUN npm run db:generate && npm run db:push && npm run build
+EXPOSE 4000
+CMD ["npm", "run", "server:start"]

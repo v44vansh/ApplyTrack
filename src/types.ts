@@ -18,6 +18,7 @@ export type Application = {
   lastUpdated: string
   logo: string
   color: string
+  version?: number
 }
 
 export type Activity = {
