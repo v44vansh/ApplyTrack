@@ -34,8 +34,8 @@ export async function createSession(prisma: PrismaClient, userId: string, reply:
   await prisma.session.create({ data: { tokenHash: hashSession(token), userId, expiresAt: new Date(Date.now() + SESSION_TTL_MS) } })
   reply.setCookie(SESSION_COOKIE, token, {
     httpOnly: true,
-    sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.COOKIE_SAME_SITE === 'none' ? 'none' : 'lax',
+    secure: process.env.COOKIE_SECURE === 'true' || process.env.NODE_ENV === 'production',
     path: '/',
     maxAge: SESSION_TTL_MS / 1000,
   })

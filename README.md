@@ -80,6 +80,71 @@ The authenticated API smoke test starts both services and verifies registration,
 npm run test:e2e:api
 ```
 
+## Deploy the frontend to GitHub Pages
+
+GitHub Pages can host the React frontend, but it cannot run the Fastify API, Prisma database, or Socket.IO server. For the complete application, deploy the frontend to Pages and the API to a separate HTTPS Node host such as Render, Railway, Fly.io, or an equivalent service.
+
+### 1. Push this repository to GitHub
+
+```bash
+git remote add origin https://github.com/YOUR_USERNAME/YOUR_REPOSITORY.git
+git push -u origin master
+```
+
+If your default branch is `main`, push `main` instead. The included `.github/workflows/deploy-pages.yml` runs on either branch.
+
+### 2. Enable GitHub Pages
+
+In the GitHub repository:
+
+1. Open **Settings → Pages**.
+2. Set **Source** to **GitHub Actions**.
+3. Push to `main` or `master`, then open the **Actions** tab and wait for **Deploy ApplyTrack to GitHub Pages** to finish.
+
+For a repository named `applytrack`, the URL will be:
+
+```text
+https://YOUR_USERNAME.github.io/applytrack/
+```
+
+The Vite configuration automatically uses the repository sub-path during the Pages build. Do not set the Pages source to “Deploy from a branch”; use GitHub Actions so the Vite base path is correct.
+
+### 3. Deploy the API separately
+
+The API needs a persistent filesystem because the current reproducible backend uses SQLite. On Render, for example:
+
+```text
+Build command: npm ci && npm run db:generate && npm run build
+Start command: npm run db:push && npm run server:start
+```
+
+Attach a persistent disk mounted at `/var/data`, then set:
+
+```env
+DATABASE_URL=file:/var/data/applytrack.db
+NODE_ENV=production
+FRONTEND_URL=https://YOUR_USERNAME.github.io
+COOKIE_SAME_SITE=none
+COOKIE_SECURE=true
+```
+
+`FRONTEND_URL` is the origin only; do not add `/applytrack/` to it. The API URL itself will look like `https://applytrack-api.onrender.com`.
+
+For higher scale, migrate the Prisma datasource from SQLite to PostgreSQL and use a managed Postgres database before deploying multiple API instances.
+
+### 4. Connect Pages to the API
+
+In GitHub, open **Settings → Secrets and variables → Actions → Variables** and add:
+
+```text
+VITE_API_URL=https://YOUR_API_HOST.example.com
+VITE_SOCKET_URL=https://YOUR_API_HOST.example.com
+```
+
+These are public browser URLs, so repository **Variables** are appropriate. Do not put database URLs, session secrets, or private credentials in `VITE_*` variables. Trigger the workflow again after adding them.
+
+If you omit these variables, the Pages site still works as a local-first static demo, but it will not provide real registration, login, server persistence, or cross-device synchronization.
+
 ## Production preview
 
 ```bash

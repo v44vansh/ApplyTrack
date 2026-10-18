@@ -1,5 +1,6 @@
 const CACHE = 'applytrack-v2'
-const APP_SHELL = ['/', '/index.html']
+const APP_BASE = new URL('./', self.registration.scope).pathname
+const APP_SHELL = [APP_BASE, `${APP_BASE}index.html`]
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(APP_SHELL)))
@@ -18,5 +19,5 @@ self.addEventListener('fetch', (event) => {
     const copy = response.clone()
     caches.open(CACHE).then((cache) => cache.put(event.request, copy))
     return response
-  }).catch(() => caches.match(event.request).then((cached) => cached || caches.match('/index.html'))))
+  }).catch(() => caches.match(event.request).then((cached) => cached || caches.match(`${APP_BASE}index.html`))))
 })
