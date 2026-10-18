@@ -38,7 +38,7 @@ Open http://localhost:5173.
 The single reproducible check command is:
 
 ```bash
-make test
+npm run check
 ```
 
 It runs:
@@ -48,6 +48,8 @@ npm run typecheck
 npm test -- --runInBand
 npm run build
 ```
+
+On Linux/macOS, `make test` runs the same checks through the included `Makefile`.
 
 The Playwright smoke suite can be run separately when the local browser is installed:
 
