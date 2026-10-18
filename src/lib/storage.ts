@@ -1,6 +1,7 @@
 import { openDB, DBSchema, IDBPDatabase } from 'idb'
 import { Activity, Application } from '../types'
 import { seedActivities, seedApplications } from '../data/seed'
+import { publishSync } from './realtime'
 
 interface ApplyTrackDB extends DBSchema {
   applications: { key: string; value: Application }
@@ -74,5 +75,5 @@ export async function resetActivities(): Promise<Activity[]> {
 }
 
 export function broadcastApplications(applications: Application[], activities: Activity[]) {
-  try { new BroadcastChannel('applytrack-sync').postMessage({ applications, activities }) } catch { /* unsupported browser */ }
+  publishSync({ applications, activities })
 }

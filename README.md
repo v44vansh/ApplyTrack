@@ -12,7 +12,7 @@ ApplyTrack is a calm, local-first job application command center. It turns a mes
 - IndexedDB persistence with localStorage fallback, BroadcastChannel cross-tab sync, and an offline service worker.
 - Deterministic seeded data so the first launch is useful without a backend or account.
 
-The demo intentionally uses a local workspace rather than pretending a backend or authentication service exists. `VITE_SOCKET_URL` is reserved for connecting a real Socket.IO service later; the default local event bus keeps the core flow fully offline.
+The demo intentionally uses a local workspace rather than pretending a backend or authentication service exists. Cross-tab updates use `BroadcastChannel` by default. Set `VITE_SOCKET_URL` to an optional Socket.IO endpoint to publish/receive the same sync payload over WebSockets; the default local transport keeps the core flow fully offline.
 
 ## Requirements
 

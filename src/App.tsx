@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { countByStage, responseRate, stageChartData, weeklyActivityData } from './lib/analytics'
+import { subscribeToSync } from './lib/realtime'
 import { useAppStore } from './store/useAppStore'
 import { Activity as ActivityEvent, Application, STAGES, STAGE_LABELS, Stage } from './types'
 
@@ -73,22 +74,20 @@ function App() {
   }, [theme])
 
   useEffect(() => {
-    const channel = (() => { try { return new BroadcastChannel('applytrack-sync') } catch { return null } })()
-    if (channel) channel.onmessage = (event) => {
-      if (Array.isArray(event.data)) replaceApplications(event.data as Application[])
-      if (event.data?.applications && event.data?.activities) {
-        replaceApplications(event.data.applications as Application[])
-        replaceActivities(event.data.activities as ActivityEvent[])
+    const unsubscribe = subscribeToSync((payload) => {
+      if (payload?.applications && payload?.activities) {
+        replaceApplications(payload.applications)
+        replaceActivities(payload.activities)
       }
-    }
+    })
     const onStorage = (event: StorageEvent) => {
       if (event.key === 'applytrack-applications' && event.newValue) {
         try { replaceApplications(JSON.parse(event.newValue) as Application[]) } catch { /* ignore malformed local data */ }
       }
     }
     window.addEventListener('storage', onStorage)
-    return () => { channel?.close(); window.removeEventListener('storage', onStorage) }
-  }, [replaceApplications])
+    return () => { unsubscribe(); window.removeEventListener('storage', onStorage) }
+  }, [replaceApplications, replaceActivities])
 
   useEffect(() => {
     if (!toast) return
