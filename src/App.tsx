@@ -10,10 +10,9 @@ import {
   Trash2, UserRound, WifiOff, X, Zap,
 } from 'lucide-react'
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { seedActivities } from './data/seed'
 import { countByStage, responseRate, stageChartData, weeklyActivityData } from './lib/analytics'
 import { useAppStore } from './store/useAppStore'
-import { Application, STAGES, STAGE_LABELS, Stage } from './types'
+import { Activity as ActivityEvent, Application, STAGES, STAGE_LABELS, Stage } from './types'
 
 type View = 'dashboard' | 'applications' | 'insights' | 'settings'
 type Modal = 'create' | 'edit' | null
@@ -34,11 +33,16 @@ const applicationSchema = z.object({
 type FormValues = z.infer<typeof applicationSchema>
 
 const uid = () => `app-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-const today = new Date().toISOString().slice(0, 10)
+const now = new Date()
+const today = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0')].join('-')
 
 function formatDate(value?: string) {
   if (!value) return 'No date'
   return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(new Date(`${value}T12:00:00`))
+}
+
+function formatLongDate(value: string) {
+  return new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }).format(new Date(`${value}T12:00:00`))
 }
 
 function initials(name: string) {
@@ -50,7 +54,7 @@ function stageColor(stage: Stage) {
 }
 
 function App() {
-  const { applications, hydrated, initialize, theme, setTheme, addApplication, updateApplication, moveApplication, deleteApplication, resetDemo, replaceApplications } = useAppStore()
+  const { applications, activities, hydrated, initialize, theme, setTheme, addApplication, updateApplication, moveApplication, deleteApplication, resetDemo, replaceApplications, replaceActivities } = useAppStore()
   const [view, setView] = useState<View>('dashboard')
   const [modal, setModal] = useState<Modal>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -70,7 +74,13 @@ function App() {
 
   useEffect(() => {
     const channel = (() => { try { return new BroadcastChannel('applytrack-sync') } catch { return null } })()
-    if (channel) channel.onmessage = (event) => { if (Array.isArray(event.data)) replaceApplications(event.data as Application[]) }
+    if (channel) channel.onmessage = (event) => {
+      if (Array.isArray(event.data)) replaceApplications(event.data as Application[])
+      if (event.data?.applications && event.data?.activities) {
+        replaceApplications(event.data.applications as Application[])
+        replaceActivities(event.data.activities as ActivityEvent[])
+      }
+    }
     const onStorage = (event: StorageEvent) => {
       if (event.key === 'applytrack-applications' && event.newValue) {
         try { replaceApplications(JSON.parse(event.newValue) as Application[]) } catch { /* ignore malformed local data */ }
@@ -144,7 +154,7 @@ function App() {
         </header>
 
         <div className="page-content">
-          {view === 'dashboard' && <Dashboard applications={filteredApplications} counts={counts} activeApplications={activeApplications} onCreate={openCreate} onSelect={openApplication} onMove={handleMove} onViewAll={() => setView('applications')} draggedId={draggedId} setDraggedId={setDraggedId} />}
+          {view === 'dashboard' && <Dashboard applications={filteredApplications} activities={activities} counts={counts} activeApplications={activeApplications} onCreate={openCreate} onSelect={openApplication} onMove={handleMove} onViewAll={() => setView('applications')} draggedId={draggedId} setDraggedId={setDraggedId} />}
           {view === 'applications' && <ApplicationsView applications={filteredApplications} allApplications={applications} search={search} setSearch={setSearch} stageFilter={stageFilter} setStageFilter={setStageFilter} layout={layout} setLayout={setLayout} onCreate={openCreate} onSelect={openApplication} onMove={handleMove} onDelete={handleDelete} draggedId={draggedId} setDraggedId={setDraggedId} />}
           {view === 'insights' && <Insights applications={applications} counts={counts} />}
           {view === 'settings' && <Settings theme={theme} setTheme={setTheme} onReset={async () => { await resetDemo(); notify('Demo data restored') }} />}
@@ -197,12 +207,12 @@ type BoardProps = {
   setDraggedId: (id: string | null) => void
 }
 
-function Dashboard({ applications, counts, activeApplications, onCreate, onSelect, onMove, onViewAll, draggedId, setDraggedId }: BoardProps & { counts: Record<Stage, number>; activeApplications: Application[]; onCreate: () => void; onViewAll: () => void }) {
+function Dashboard({ applications, activities, counts, activeApplications, onCreate, onSelect, onMove, onViewAll, draggedId, setDraggedId }: BoardProps & { activities: ActivityEvent[]; counts: Record<Stage, number>; activeApplications: Application[]; onCreate: () => void; onViewAll: () => void }) {
   const next = [...applications].filter((app) => app.stage !== 'rejected' && app.nextActionDate).sort((a, b) => (a.nextActionDate ?? '').localeCompare(b.nextActionDate ?? ''))[0]
   const interviewCount = applications.filter((app) => app.stage === 'interview').length
   return <>
     <section className="page-heading dashboard-heading">
-      <div><p className="eyebrow">Saturday, October 18, 2026 <span className="live-dot" /> Live workspace</p><h1>Good morning, Jordan <span className="wave">✦</span></h1><p className="subtitle">A clear view of your search, so you can focus on the next right move.</p></div>
+      <div><p className="eyebrow">{formatLongDate(today)} <span className="live-dot" /> Live workspace</p><h1>Good morning, Jordan <span className="wave">✦</span></h1><p className="subtitle">A clear view of your search, so you can focus on the next right move.</p></div>
       <button className="primary-button" onClick={onCreate}><Plus size={17} /> Add application</button>
     </section>
     <div className="stat-grid">
@@ -216,7 +226,7 @@ function Dashboard({ applications, counts, activeApplications, onCreate, onSelec
       <PipelineBoard applications={applications} onSelect={onSelect} onMove={onMove} draggedId={draggedId} setDraggedId={setDraggedId} />
     </section>
     <section className="bottom-grid">
-      <div className="section-block activity-panel"><div className="section-heading"><div><h2>Recent activity</h2><p>Your latest progress at a glance.</p></div><button className="icon-button" aria-label="More activity options"><MoreHorizontal size={18} /></button></div><ActivityList applications={applications} /></div>
+      <div className="section-block activity-panel"><div className="section-heading"><div><h2>Recent activity</h2><p>Your latest progress at a glance.</p></div><button className="icon-button" aria-label="More activity options"><MoreHorizontal size={18} /></button></div><ActivityList applications={applications} activities={activities} /></div>
       <div className="section-block focus-panel"><div className="focus-top"><div className="focus-icon"><Sparkles size={18} /></div><span>Weekly focus</span><MoreHorizontal size={17} /></div><h3>Small steps compound.</h3><p>You've made progress on <strong>{interviewCount + counts.offer} promising conversations</strong> this week. Keep the rhythm going.</p><div className="focus-progress"><span style={{ width: `${Math.min(100, 35 + interviewCount * 15)}%` }} /></div><div className="focus-footer"><span>Weekly goal</span><strong>{Math.min(5, interviewCount + counts.offer)} / 5 actions</strong></div></div>
     </section>
   </>
@@ -245,11 +255,9 @@ function ApplicationCard({ application, onSelect, onMove, onDragStart, onDragEnd
   </article>
 }
 
-function ActivityList({ applications }: { applications: Application[] }) {
-  const seededIds = new Set(seedActivities.map((activity) => activity.applicationId))
-  const newActivities = applications.filter((app) => !seededIds.has(app.id)).map((app) => ({ id: `dynamic-${app.id}`, applicationId: app.id, type: 'created' as const, text: `Added ${app.company} to your pipeline`, date: app.lastUpdated }))
-  const activities = [...newActivities, ...seedActivities].map((activity) => ({ ...activity, application: applications.find((app) => app.id === activity.applicationId) })).filter((item) => item.application)
-  return <div className="activity-list">{activities.slice(0, 4).map((activity) => <div className="activity-row" key={activity.id}><div className={`activity-marker ${activity.type}`}><Activity size={14} /></div><div><strong>{activity.text}</strong><span>{formatDate(activity.date)} · {activity.application?.company}</span></div><ArrowRight size={14} className="activity-arrow" /></div>)}</div>
+function ActivityList({ applications, activities }: { applications: Application[]; activities: ActivityEvent[] }) {
+  const visibleActivities = activities.map((activity) => ({ ...activity, application: applications.find((app) => app.id === activity.applicationId) })).filter((item) => item.application)
+  return <div className="activity-list">{visibleActivities.slice(0, 4).map((activity) => <div className="activity-row" key={activity.id}><div className={`activity-marker ${activity.type}`}><Activity size={14} /></div><div><strong>{activity.text}</strong><span>{formatDate(activity.date)} · {activity.application?.company}</span></div><ArrowRight size={14} className="activity-arrow" /></div>)}</div>
 }
 
 type ApplicationsViewProps = BoardProps & {

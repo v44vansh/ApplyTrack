@@ -1,6 +1,6 @@
 import { openDB, DBSchema, IDBPDatabase } from 'idb'
-import { Application } from '../types'
-import { seedApplications } from '../data/seed'
+import { Activity, Application } from '../types'
+import { seedActivities, seedApplications } from '../data/seed'
 
 interface ApplyTrackDB extends DBSchema {
   applications: { key: string; value: Application }
@@ -9,6 +9,7 @@ interface ApplyTrackDB extends DBSchema {
 const DB_NAME = 'applytrack-db'
 const STORE_NAME = 'applications'
 const FALLBACK_KEY = 'applytrack-applications'
+const ACTIVITY_KEY = 'applytrack-activities'
 let dbPromise: Promise<IDBPDatabase<ApplyTrackDB>> | null = null
 
 const canUseIndexedDb = () => typeof window !== 'undefined' && 'indexedDB' in window
@@ -55,6 +56,23 @@ export async function resetApplications(): Promise<Application[]> {
   return seedApplications
 }
 
-export function broadcastApplications(applications: Application[]) {
-  try { new BroadcastChannel('applytrack-sync').postMessage(applications) } catch { /* unsupported browser */ }
+export async function loadActivities(): Promise<Activity[]> {
+  try {
+    const saved = window.localStorage.getItem(ACTIVITY_KEY)
+    if (saved) return JSON.parse(saved) as Activity[]
+  } catch { /* use seed */ }
+  return seedActivities
+}
+
+export async function saveActivities(activities: Activity[]): Promise<void> {
+  try { window.localStorage.setItem(ACTIVITY_KEY, JSON.stringify(activities)) } catch { /* private mode */ }
+}
+
+export async function resetActivities(): Promise<Activity[]> {
+  await saveActivities(seedActivities)
+  return seedActivities
+}
+
+export function broadcastApplications(applications: Application[], activities: Activity[]) {
+  try { new BroadcastChannel('applytrack-sync').postMessage({ applications, activities }) } catch { /* unsupported browser */ }
 }
