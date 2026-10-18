@@ -8,5 +8,5 @@ vite.config.d.ts
 playwright.config.js
 playwright.config.d.ts
 .DS_Store
-prisma/*.db
-prisma/*.db-journal
+prisma/**/*.db
+prisma/**/*.db-journal
