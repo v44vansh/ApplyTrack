@@ -32,6 +32,8 @@ jobs:
         env:
           VITE_API_URL: ${{ vars.VITE_API_URL }}
           VITE_SOCKET_URL: ${{ vars.VITE_SOCKET_URL }}
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
       - name: Configure Pages
         uses: actions/configure-pages@v5
         with:

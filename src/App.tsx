@@ -91,6 +91,11 @@ function App() {
         }
       }
       if ('kind' in payload && payload.kind === 'delete') replaceApplications(useAppStore.getState().applications.filter((application) => application.id !== payload.applicationId))
+      if ('kind' in payload && payload.kind === 'activity') {
+        const state = useAppStore.getState()
+        const withoutDuplicate = state.activities.filter((activity) => !(activity.applicationId === payload.activity.applicationId && activity.text === payload.activity.text))
+        if (withoutDuplicate.length !== state.activities.length || !state.activities.some((activity) => activity.id === payload.activity.id)) replaceActivities([payload.activity, ...withoutDuplicate])
+      }
     })
     const onStorage = (event: StorageEvent) => {
       if (event.key === 'applytrack-applications' && event.newValue) {
@@ -99,7 +104,7 @@ function App() {
     }
     window.addEventListener('storage', onStorage)
     return () => { unsubscribe(); window.removeEventListener('storage', onStorage) }
-  }, [replaceApplications, replaceActivities])
+  }, [authStatus, replaceApplications, replaceActivities])
 
   useEffect(() => {
     if (!toast) return

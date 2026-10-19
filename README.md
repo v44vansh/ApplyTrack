@@ -10,10 +10,11 @@ ApplyTrack is a calm, local-first job application command center. It turns a mes
 - Analytics view with activity, pipeline health, and conversion snapshot charts.
 - Light/dark themes and keyboard-friendly dialogs, controls, and visible focus states.
 - IndexedDB persistence with localStorage fallback, BroadcastChannel cross-tab sync, and an offline service worker.
-- Optional Fastify API with SQLite/Prisma persistence, secure cookie sessions, password hashing, protected routes, and Socket.IO change notifications.
+- Supabase production mode with email/password auth, PostgreSQL, Row Level Security, and realtime subscriptions.
+- Optional Fastify API with SQLite/Prisma persistence for self-hosted/local deployments.
 - Deterministic seeded data so the first launch is useful without a backend or account.
 
-Without `VITE_API_URL`, the frontend runs in local demo mode. With the API configured, it uses real registration/login, protected workspace data, server CRUD, sessions, and Socket.IO updates. Cross-tab updates use `BroadcastChannel` by default.
+Without Supabase or `VITE_API_URL`, the frontend runs in local demo mode. With Supabase variables, it uses real registration/login, PostgreSQL CRUD, RLS-protected workspace data, and Supabase Realtime. Cross-tab updates use `BroadcastChannel` in local mode.
 
 ## Requirements
 
@@ -33,6 +34,15 @@ npm run db:generate
 npm run db:push
 ```
 
+For Supabase mode, add these variables to `.env` instead:
+
+```env
+VITE_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+VITE_SUPABASE_ANON_KEY=YOUR_PUBLIC_ANON_KEY
+```
+
+Then run the SQL in [`supabase/schema.sql`](supabase/schema.sql) once in **Supabase → SQL Editor**. The schema creates the tables, indexes, activity triggers, RLS policies, and Realtime publication entries.
+
 ## Run locally
 
 ```bash
@@ -41,7 +51,7 @@ npm run dev
 
 Open http://localhost:5173.
 
-Run the API in a second terminal when using authenticated mode:
+Run the API in a second terminal when using Fastify authenticated mode:
 
 ```bash
 npm run server:start
@@ -82,7 +92,7 @@ npm run test:e2e:api
 
 ## Deploy the frontend to GitHub Pages
 
-GitHub Pages can host the React frontend, but it cannot run the Fastify API, Prisma database, or Socket.IO server. For the complete application, deploy the frontend to Pages and the API to a separate HTTPS Node host such as Render, Railway, Fly.io, or an equivalent service.
+GitHub Pages can host the React frontend, but it cannot run a server. For the zero-cost multi-user production setup, use GitHub Pages plus Supabase. The existing Fastify API remains available for self-hosted deployments but is not needed when Supabase variables are present.
 
 ### 1. Push this repository to GitHub
 
@@ -109,7 +119,35 @@ https://YOUR_USERNAME.github.io/applytrack/
 
 The Vite configuration automatically uses the repository sub-path during the Pages build. Do not set the Pages source to “Deploy from a branch”; use GitHub Actions so the Vite base path is correct.
 
-### 3. Deploy the API separately
+### 3. Configure Supabase
+
+1. Create a free Supabase project.
+2. In **SQL Editor**, run [`supabase/schema.sql`](supabase/schema.sql).
+3. In **Authentication → Providers**, enable Email.
+4. In **Authentication → URL Configuration**, set the Site URL to:
+
+```text
+https://YOUR_USERNAME.github.io/YOUR_REPOSITORY/
+```
+
+5. Add the same URL as an allowed redirect URL.
+
+The browser uses only the Supabase URL and public anon key. RLS policies ensure each signed-in user can access only their own applications and activities.
+
+### 4. Connect Pages to Supabase
+
+In GitHub, open **Settings → Secrets and variables → Actions → Variables** and add:
+
+```text
+VITE_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+VITE_SUPABASE_ANON_KEY=YOUR_PUBLIC_ANON_KEY
+```
+
+Do not add `service_role`, database passwords, or other private credentials to `VITE_*` variables. Trigger **Deploy ApplyTrack to GitHub Pages** again after adding them. The workflow passes these variables into the Vite build.
+
+After deployment, register two accounts in separate browsers and verify that each account has an isolated workspace. Open the same account in two tabs to verify Realtime updates.
+
+### Optional: deploy the Fastify API separately
 
 The API needs a persistent filesystem because the current reproducible backend uses SQLite. On Render, for example:
 
@@ -132,7 +170,7 @@ COOKIE_SECURE=true
 
 For higher scale, migrate the Prisma datasource from SQLite to PostgreSQL and use a managed Postgres database before deploying multiple API instances.
 
-### 4. Connect Pages to the API
+### Optional API variables
 
 In GitHub, open **Settings → Secrets and variables → Actions → Variables** and add:
 
@@ -143,7 +181,7 @@ VITE_SOCKET_URL=https://YOUR_API_HOST.example.com
 
 These are public browser URLs, so repository **Variables** are appropriate. Do not put database URLs, session secrets, or private credentials in `VITE_*` variables. Trigger the workflow again after adding them.
 
-If you omit these variables, the Pages site still works as a local-first static demo, but it will not provide real registration, login, server persistence, or cross-device synchronization.
+If you omit Supabase variables and API variables, the Pages site works as a local-first static demo only.
 
 ## Production preview
 

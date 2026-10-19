@@ -1,7 +1,8 @@
 import { create } from 'zustand'
 import { seedApplications } from '../data/seed'
 import { Activity, Application, STAGE_LABELS, Stage } from '../types'
-import { authApi, isApiConfigured, SessionUser, workspaceApi } from '../lib/api'
+import { SessionUser } from '../lib/api'
+import { remoteAuth, remoteConfigured, remoteWorkspace } from '../lib/remote'
 import { broadcastApplications, loadActivities, loadApplications, resetActivities, resetApplications, saveActivities, saveApplications } from '../lib/storage'
 
 type Theme = 'light' | 'dark'
@@ -41,7 +42,7 @@ function initialTheme(): Theme {
 const persist = (applications: Application[], activities: Activity[]) => {
   void saveApplications(applications)
   void saveActivities(activities)
-  broadcastApplications(applications, activities)
+  if (!remoteConfigured) broadcastApplications(applications, activities)
 }
 
 function withVersion(application: Application) {
@@ -52,15 +53,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   applications: seedApplications,
   activities: [],
   hydrated: false,
-  authStatus: isApiConfigured ? 'checking' : 'local',
+  authStatus: remoteConfigured ? 'checking' : 'local',
   user: null,
   authError: null,
   theme: typeof window !== 'undefined' ? initialTheme() : 'light',
   initialize: async () => {
-    if (isApiConfigured) {
+    if (remoteConfigured) {
       try {
-        const { user } = await authApi.me()
-        const workspace = await workspaceApi.load()
+        const user = await remoteAuth.me()
+        const workspace = await remoteWorkspace.load()
         const applications = workspace.applications.map(withVersion)
         set({ applications, activities: workspace.activities, hydrated: true, authStatus: 'authenticated', user, authError: null })
         persist(applications, workspace.activities)
@@ -76,21 +77,21 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ applications, activities, hydrated: true, authStatus: 'local' })
   },
   login: async (email, password) => {
-    const { user } = await authApi.login(email, password)
-    const workspace = await workspaceApi.load()
+    const user = await remoteAuth.login(email, password)
+    const workspace = await remoteWorkspace.load()
     const applications = workspace.applications.map(withVersion)
     set({ applications, activities: workspace.activities, authStatus: 'authenticated', user, authError: null })
     persist(applications, workspace.activities)
   },
   register: async (name, email, password) => {
-    const { user } = await authApi.register(name, email, password)
-    const workspace = await workspaceApi.load()
+    const user = await remoteAuth.register(name, email, password)
+    const workspace = await remoteWorkspace.load()
     const applications = workspace.applications.map(withVersion)
     set({ applications, activities: workspace.activities, authStatus: 'authenticated', user, authError: null })
     persist(applications, workspace.activities)
   },
   logout: async () => {
-    await authApi.logout()
+    await remoteAuth.logout()
     set({ authStatus: 'unauthenticated', user: null, applications: [], activities: [] })
   },
   setTheme: (theme) => {
@@ -103,10 +104,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     const activities = [{ id: `activity-${Date.now()}`, applicationId: application.id, type: 'created' as const, text: `Added ${application.company} to your pipeline`, date: application.lastUpdated }, ...get().activities]
     set({ applications, activities })
     persist(applications, activities)
-    if (isApiConfigured && get().authStatus === 'authenticated') {
-      void workspaceApi.create(application).then((saved) => {
+    if (remoteConfigured && get().authStatus === 'authenticated') {
+      void remoteWorkspace.create(application).then(({ application: saved }) => {
         const reconciled = get().applications.map((item) => item.id === optimistic.id ? withVersion(saved) : item)
-        const reconciledActivities = get().activities.map((activity) => activity.applicationId === optimistic.id ? { ...activity, applicationId: saved.id } : activity)
+        const reconciledActivities = get().activities
+          .map((item) => item.applicationId === optimistic.id ? { ...item, applicationId: saved.id } : item)
+          .filter((item) => item.text !== `Added ${saved.company} to your pipeline` || item.applicationId !== saved.id)
         set({ applications: reconciled, activities: reconciledActivities })
         persist(reconciled, reconciledActivities)
       }).catch((error) => set({ authError: error instanceof Error ? error.message : 'Could not sync application.' }))
@@ -118,7 +121,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const activities = patch.notes !== undefined && current ? [{ id: `activity-${Date.now()}`, applicationId: id, type: 'note' as const, text: `Updated notes for ${current.company}`, date: new Date().toISOString().slice(0, 10) }, ...get().activities] : get().activities
     set({ applications, activities })
     persist(applications, activities)
-    if (isApiConfigured && get().authStatus === 'authenticated') void workspaceApi.update(id, { ...patch, version: current?.version }).then((saved) => {
+    if (remoteConfigured && get().authStatus === 'authenticated') void remoteWorkspace.update(id, { ...patch, version: current?.version }).then((saved) => {
       const reconciled = get().applications.map((item) => item.id === id ? withVersion(saved) : item)
       set({ applications: reconciled })
       persist(reconciled, get().activities)
@@ -130,7 +133,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const activities = current && current.stage !== stage ? [{ id: `activity-${Date.now()}`, applicationId: id, type: 'move' as const, text: `${current.company} moved to ${STAGE_LABELS[stage]}`, date: new Date().toISOString().slice(0, 10) }, ...get().activities] : get().activities
     set({ applications, activities })
     persist(applications, activities)
-    if (isApiConfigured && get().authStatus === 'authenticated') void workspaceApi.update(id, { stage, version: current?.version }).then((saved) => {
+    if (remoteConfigured && get().authStatus === 'authenticated') void remoteWorkspace.update(id, { stage, version: current?.version }).then((saved) => {
       const reconciled = get().applications.map((item) => item.id === id ? withVersion(saved) : item)
       set({ applications: reconciled })
       persist(reconciled, get().activities)
@@ -140,7 +143,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const applications = get().applications.filter((app) => app.id !== id)
     set({ applications })
     persist(applications, get().activities)
-    if (isApiConfigured && get().authStatus === 'authenticated') void workspaceApi.remove(id).catch((error) => set({ authError: error instanceof Error ? error.message : 'Could not delete application.' }))
+    if (remoteConfigured && get().authStatus === 'authenticated') void remoteWorkspace.remove(id).catch((error) => set({ authError: error instanceof Error ? error.message : 'Could not delete application.' }))
   },
   resetDemo: async () => set({ applications: await resetApplications(), activities: await resetActivities() }),
   replaceApplications: (applications) => set({ applications }),

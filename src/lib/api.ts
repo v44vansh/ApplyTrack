@@ -1,9 +1,10 @@
 import { Activity, Application } from '../types'
 
 const configuredApiBase = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '')
-const apiBase = configuredApiBase ?? (import.meta.env.PROD ? '' : undefined)
+const supabaseEnvConfigured = Boolean(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY)
+const apiBase = configuredApiBase ?? (import.meta.env.PROD && !supabaseEnvConfigured ? '' : undefined)
 
-export const isApiConfigured = configuredApiBase !== undefined || import.meta.env.PROD
+export const isApiConfigured = Boolean(configuredApiBase) || (import.meta.env.PROD && !supabaseEnvConfigured)
 
 export type SessionUser = { id: string; email: string; name: string }
 export type WorkspaceSnapshot = { applications: Application[]; activities: Activity[]; revision: string }
