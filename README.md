@@ -130,7 +130,14 @@ The Vite configuration automatically uses the repository sub-path during the Pag
 https://YOUR_USERNAME.github.io/YOUR_REPOSITORY/
 ```
 
-5. Add the same URL as an allowed redirect URL.
+5. Add both the app URL and its verification route as allowed redirect URLs:
+
+```text
+https://YOUR_USERNAME.github.io/YOUR_REPOSITORY/
+https://YOUR_USERNAME.github.io/YOUR_REPOSITORY/verify-email
+```
+
+   ApplyTrack sends confirmation links to `/verify-email`; the deployed build includes a GitHub Pages SPA fallback so that route opens the app instead of a 404.
 
 The browser uses only the Supabase URL and public anon key. RLS policies ensure each signed-in user can access only their own applications and activities.
 

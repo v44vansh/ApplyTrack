@@ -91,6 +91,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     persist(applications, workspace.activities)
   },
   logout: async () => {
+    if (!remoteConfigured) return
     await remoteAuth.logout()
     set({ authStatus: 'unauthenticated', user: null, applications: [], activities: [] })
   },

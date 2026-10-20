@@ -89,7 +89,9 @@ export const supabaseAuth = {
     return userFromAuth(data.user)
   },
   async register(name: string, email: string, password: string) {
-    const { data, error } = await client().auth.signUp({ email, password, options: { data: { name } } })
+    const base = import.meta.env.BASE_URL.replace(/\/+$/, '')
+    const emailRedirectTo = `${window.location.origin}${base}/verify-email`
+    const { data, error } = await client().auth.signUp({ email, password, options: { data: { name }, emailRedirectTo } })
     if (error || !data.user) throw new Error(error?.message ?? 'Unable to create your account.')
     if (!data.session) throw new Error('Account created. Confirm your email, then sign in to continue.')
     return userFromAuth(data.user)

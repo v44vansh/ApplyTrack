@@ -1,4 +1,4 @@
-import { FormEvent, ReactNode, useEffect, useMemo, useState } from 'react'
+import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -12,6 +12,8 @@ import {
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { countByStage, responseRate, stageChartData, weeklyActivityData } from './lib/analytics'
 import { subscribeToSync } from './lib/realtime'
+import { getPasswordStrength } from './lib/passwordStrength'
+import { getShortcutModifier } from './lib/shortcuts'
 import { useAppStore } from './store/useAppStore'
 import { Activity as ActivityEvent, Application, STAGES, STAGE_LABELS, Stage } from './types'
 
@@ -50,6 +52,17 @@ function initials(name: string) {
   return name.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase()
 }
 
+function verificationRoute() {
+  const base = import.meta.env.BASE_URL.replace(/\/+$/, '')
+  return `${base}/verify-email` || '/verify-email'
+}
+
+function isVerificationRoute(pathname: string) {
+  const normalizedPath = pathname.replace(/\/+$/, '') || '/'
+  const normalizedRoute = verificationRoute().replace(/\/+$/, '') || '/verify-email'
+  return normalizedPath === normalizedRoute
+}
+
 function stageColor(stage: Stage) {
   return STAGES.find((item) => item.id === stage)?.color ?? '#6d7f92'
 }
@@ -65,6 +78,10 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   const [draggedId, setDraggedId] = useState<string | null>(null)
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false)
+  const [pathname, setPathname] = useState(() => window.location.pathname)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  const shortcutModifier = useMemo(() => getShortcutModifier(), [])
 
   useEffect(() => { void initialize() }, [initialize])
 
@@ -129,6 +146,28 @@ function App() {
     }
   }, [modal, selectedId])
 
+  useEffect(() => {
+    const onPopState = () => setPathname(window.location.pathname)
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [])
+
+  useEffect(() => {
+    if (!profileMenuOpen) return
+    const onPointerDown = (event: PointerEvent) => {
+      if (!(event.target instanceof Element) || !event.target.closest('.profile-menu')) setProfileMenuOpen(false)
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setProfileMenuOpen(false)
+    }
+    window.addEventListener('pointerdown', onPointerDown)
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown)
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [profileMenuOpen])
+
   const selected = applications.find((application) => application.id === selectedId) ?? null
   const counts = useMemo(() => countByStage(applications), [applications])
   const activeApplications = applications.filter((application) => application.stage !== 'rejected')
@@ -139,7 +178,7 @@ function App() {
   }), [applications, search, stageFilter])
 
   const notify = (message: string) => setToast(message)
-  const openCreate = () => { setModal('create'); setSidebarOpen(false) }
+  const openCreate = useCallback(() => { setModal('create'); setSidebarOpen(false) }, [])
   const openApplication = (application: Application) => setSelectedId(application.id)
   const handleMove = (id: string, stage: Stage) => {
     moveApplication(id, stage)
@@ -153,20 +192,46 @@ function App() {
     notify('Application removed')
   }
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return
+      const target = event.target as HTMLElement | null
+      const isFormControl = target?.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target?.tagName ?? '')
+      if (isFormControl && event.key.toLowerCase() !== 'n') return
+      if (event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        searchInputRef.current?.focus()
+      }
+      if (event.key.toLowerCase() === 'n') {
+        event.preventDefault()
+        openCreate()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [openCreate])
+
+  const leaveVerificationRoute = () => {
+    const destination = import.meta.env.BASE_URL
+    window.history.replaceState({}, '', destination)
+    setPathname(destination)
+  }
+
   if (!hydrated) return <LoadingScreen />
+  if (isVerificationRoute(pathname)) return <VerifyEmailScreen authenticated={authStatus === 'authenticated'} error={authStatus === 'error' ? authError : null} onContinue={leaveVerificationRoute} />
   if (authStatus === 'unauthenticated' || authStatus === 'error') return <AuthScreen mode={authStatus === 'error' ? 'error' : 'login'} initialError={authError} onLogin={login} onRegister={register} />
 
   return (
     <div className="app-shell">
-      <Sidebar view={view} setView={setView} openCreate={openCreate} applicationCount={applications.length} user={user} onLogout={logout} open={sidebarOpen} close={() => setSidebarOpen(false)} />
+      <Sidebar view={view} setView={setView} openCreate={openCreate} shortcutModifier={shortcutModifier} applicationCount={applications.length} user={user} onLogout={logout} open={sidebarOpen} close={() => setSidebarOpen(false)} />
       <main className="main-shell">
         <header className="topbar">
           <button className="mobile-menu icon-button" aria-label="Open navigation" onClick={() => setSidebarOpen(true)}><Menu size={19} /></button>
           <div className="breadcrumb"><span>Workspace</span><ArrowRight size={14} /><strong>{view === 'dashboard' ? 'Overview' : view[0].toUpperCase() + view.slice(1)}</strong></div>
           <div className="topbar-actions">
-            <label className="global-search"><Search size={16} /><input aria-label="Search applications" placeholder="Search applications" value={search} onChange={(event) => setSearch(event.target.value)} /><kbd><Command size={11} /> K</kbd></label>
+            <label className="global-search"><Search size={16} /><input ref={searchInputRef} aria-label="Search applications" placeholder="Search applications" value={search} onChange={(event) => setSearch(event.target.value)} /><kbd aria-label={`${shortcutModifier} K shortcut`}>{shortcutModifier === '⌘' && <Command size={11} />}{shortcutModifier !== '⌘' && <span>{shortcutModifier}</span>} K</kbd></label>
             <button className="icon-button notification-button" aria-label="Notifications"><Bell size={18} /><span className="notification-dot" /></button>
-            <button className="avatar-button" aria-label="Open profile menu">JD</button>
+            <div className="profile-menu"><button className="avatar-button" aria-label="Open profile menu" aria-expanded={profileMenuOpen} onClick={() => setProfileMenuOpen((open) => !open)}>{user ? initials(user.name) : <UserRound size={15} />}</button>{profileMenuOpen && <div className="profile-popover" role="menu"><div className="profile-popover-header"><div className="profile-avatar">{user ? initials(user.name) : <UserRound size={15} />}</div><div><strong>{user?.name ?? 'Local workspace'}</strong><span>{user?.email ?? 'Demo data stored in this browser'}</span></div></div><button role="menuitem" onClick={() => { setView('settings'); setProfileMenuOpen(false) }}><Settings2 size={15} /> Account settings</button><button role="menuitem" onClick={() => { setProfileMenuOpen(false); void logout() }}><LogOut size={15} /> Sign out</button></div>}</div>
           </div>
         </header>
 
@@ -174,7 +239,7 @@ function App() {
           {view === 'dashboard' && <Dashboard applications={filteredApplications} activities={activities} userName={user?.name ?? 'Jordan'} counts={counts} activeApplications={activeApplications} onCreate={openCreate} onSelect={openApplication} onMove={handleMove} onViewAll={() => setView('applications')} draggedId={draggedId} setDraggedId={setDraggedId} />}
           {view === 'applications' && <ApplicationsView applications={filteredApplications} allApplications={applications} search={search} setSearch={setSearch} stageFilter={stageFilter} setStageFilter={setStageFilter} layout={layout} setLayout={setLayout} onCreate={openCreate} onSelect={openApplication} onMove={handleMove} onDelete={handleDelete} draggedId={draggedId} setDraggedId={setDraggedId} />}
           {view === 'insights' && <Insights applications={applications} counts={counts} />}
-          {view === 'settings' && <Settings theme={theme} setTheme={setTheme} onReset={async () => { await resetDemo(); notify('Demo data restored') }} />}
+          {view === 'settings' && <Settings theme={theme} setTheme={setTheme} user={user} onReset={async () => { await resetDemo(); notify('Demo data restored') }} />}
         </div>
       </main>
 
@@ -189,7 +254,7 @@ function LoadingScreen() {
   return <div className="loading-screen"><div className="brand-mark">✓</div><span>Loading your workspace…</span></div>
 }
 
-function AuthScreen({ mode, initialError, onLogin, onRegister }: { mode: 'login' | 'error'; initialError: string | null; onLogin: (email: string, password: string) => Promise<void>; onRegister: (name: string, email: string, password: string) => Promise<void> }) {
+function LegacyAuthScreen({ mode, initialError, onLogin, onRegister }: { mode: 'login' | 'error'; initialError: string | null; onLogin: (email: string, password: string) => Promise<void>; onRegister: (name: string, email: string, password: string) => Promise<void> }) {
   const [registerMode, setRegisterMode] = useState(false)
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -208,9 +273,33 @@ function AuthScreen({ mode, initialError, onLogin, onRegister }: { mode: 'login'
   return <div className="auth-shell"><div className="auth-aside"><div className="brand auth-brand"><div className="brand-mark">✓</div><div><strong>apply<span>track</span></strong><small>job search, in focus</small></div></div><div className="auth-quote"><Sparkles size={19} /><h2>A calmer search starts with a clearer next step.</h2><p>Keep every opportunity, conversation, and follow-up in one focused workspace.</p></div><div className="auth-aside-footer"><CheckCircle2 size={15} /> Your workspace is private by default</div></div><section className="auth-card-wrap"><div className="auth-card"><div className="auth-card-header"><span className="eyebrow">Welcome to ApplyTrack</span><h1>{registerMode ? 'Create your workspace' : 'Welcome back'}</h1><p>{registerMode ? 'Start turning your search into momentum.' : 'Sign in to pick up where you left off.'}</p></div>{mode === 'error' && <div className="auth-error"><WifiOff size={15} />{initialError || 'The workspace server is unavailable. Start the API or try again.'}</div>}<form onSubmit={(event) => void submit(event)}>{registerMode && <label className="auth-field"><span>Your name</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="Jordan Davis" autoComplete="name" /></label>}<label className="auth-field"><span>Email address</span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" /></label><label className="auth-field"><span>Password</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="8+ characters" autoComplete={registerMode ? 'new-password' : 'current-password'} /></label>{error && mode !== 'error' && <div className="auth-error"><CircleAlert size={15} />{error}</div>}<button className="primary-button auth-submit" type="submit" disabled={busy}>{busy ? 'Please wait…' : registerMode ? 'Create account' : 'Sign in'} <ArrowRight size={15} /></button></form><button className="auth-switch" onClick={() => { setRegisterMode((value) => !value); setError('') }}>{registerMode ? 'Already have an account? Sign in' : 'New to ApplyTrack? Create an account'}</button></div></section></div>
 }
 
-type SidebarProps = { view: View; setView: (view: View) => void; openCreate: () => void; applicationCount: number; user: { name: string; email: string } | null; onLogout: () => Promise<void>; open: boolean; close: () => void }
+function VerifyEmailScreen({ authenticated, error, onContinue }: { authenticated: boolean; error: string | null; onContinue: () => void }) {
+  return <div className="verify-shell"><section className="verify-card"><div className={`verify-icon ${authenticated ? 'verified' : ''}`}>{authenticated ? <CheckCircle2 size={26} /> : <Mail size={26} />}</div><span className="eyebrow">ApplyTrack account</span><h1>{authenticated ? 'Email verified' : 'Check your inbox'}</h1><p>{authenticated ? 'Your account is ready. Take a breath, then jump back into your workspace.' : 'Open the confirmation link from your email to finish setting up your workspace.'}</p>{error && <div className="auth-error"><CircleAlert size={15} />{error}</div>}<button className="primary-button" onClick={onContinue}>{authenticated ? 'Continue to workspace' : 'Back to sign in'} <ArrowRight size={15} /></button></section></div>
+}
 
-function Sidebar({ view, setView, openCreate, applicationCount, user, onLogout, open, close }: SidebarProps) {
+function AuthScreen({ mode, initialError, onLogin, onRegister }: { mode: 'login' | 'error'; initialError: string | null; onLogin: (email: string, password: string) => Promise<void>; onRegister: (name: string, email: string, password: string) => Promise<void> }) {
+  const [registerMode, setRegisterMode] = useState(false)
+  const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState(initialError ?? '')
+  const [busy, setBusy] = useState(false)
+  const strength = registerMode && password ? getPasswordStrength(password) : null
+  const submit = async (event: FormEvent) => {
+    event.preventDefault()
+    setError('')
+    if (registerMode && name.trim().length < 2) return setError('Enter your name to create an account.')
+    if (!email.includes('@')) return setError('Enter a valid email address.')
+    if (password.length < 8) return setError('Password must be at least 8 characters.')
+    setBusy(true)
+    try { registerMode ? await onRegister(name.trim(), email.trim(), password) : await onLogin(email.trim(), password) } catch (authError) { setError(authError instanceof Error ? authError.message : 'Unable to sign in.') } finally { setBusy(false) }
+  }
+  return <div className="auth-shell"><div className="auth-aside"><div className="brand auth-brand"><div className="brand-mark">✓</div><div><strong>apply<span>track</span></strong><small>job search, in focus</small></div></div><div className="auth-quote"><Sparkles size={19} /><h2>A calmer search starts with a clearer next step.</h2><p>Keep every opportunity, conversation, and follow-up in one focused workspace.</p></div><div className="auth-aside-footer"><CheckCircle2 size={15} /> Your workspace is private by default</div></div><section className="auth-card-wrap"><div className="auth-card"><div className="auth-card-header"><span className="eyebrow">Welcome to ApplyTrack</span><h1>{registerMode ? 'Create your workspace' : 'Welcome back'}</h1><p>{registerMode ? 'Start turning your search into momentum.' : 'Sign in to pick up where you left off.'}</p></div>{mode === 'error' && <div className="auth-error"><WifiOff size={15} />{initialError || 'The workspace server is unavailable. Start the API or try again.'}</div>}<form onSubmit={(event) => void submit(event)}>{registerMode && <label className="auth-field"><span>Your name</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="Jordan Davis" autoComplete="name" /></label>}<label className="auth-field"><span>Email address</span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" autoComplete="email" /></label><label className="auth-field"><span>Password</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="8+ characters" autoComplete={registerMode ? 'new-password' : 'current-password'} />{registerMode && strength && <div className={`password-strength ${strength.level}`} aria-live="polite"><div className="password-strength-label"><span>Password strength</span><strong>{strength.label}</strong></div><div className="password-strength-bars" aria-hidden="true">{[1, 2, 3, 4, 5].map((bar) => <span className={bar <= strength.score ? 'filled' : ''} key={bar} />)}</div><small>Use 8+ characters with upper/lowercase, a number, and a symbol.</small></div>}</label>{error && mode !== 'error' && <div className="auth-error"><CircleAlert size={15} />{error}</div>}<button className="primary-button auth-submit" type="submit" disabled={busy}>{busy ? 'Please wait…' : registerMode ? 'Create account' : 'Sign in'} <ArrowRight size={15} /></button></form><button className="auth-switch" type="button" onClick={() => { setRegisterMode(!registerMode); setError(''); setPassword('') }}>{registerMode ? 'Already have an account? Sign in' : 'New to ApplyTrack? Create an account'}</button></div></section></div>
+}
+
+type SidebarProps = { view: View; setView: (view: View) => void; openCreate: () => void; shortcutModifier: string; applicationCount: number; user: { name: string; email: string } | null; onLogout: () => Promise<void>; open: boolean; close: () => void }
+
+function Sidebar({ view, setView, openCreate, shortcutModifier, applicationCount, user, onLogout, open, close }: SidebarProps) {
   const navItems: Array<{ id: View; label: string; icon: typeof LayoutDashboard; badge?: string }> = [
     { id: 'dashboard', label: 'Overview', icon: LayoutDashboard },
     { id: 'applications', label: 'Applications', icon: BriefcaseBusiness, badge: String(applicationCount) },
@@ -220,7 +309,7 @@ function Sidebar({ view, setView, openCreate, applicationCount, user, onLogout, 
     {open && <button className="sidebar-backdrop" aria-label="Close navigation" onClick={close} />}
     <aside className={`sidebar ${open ? 'sidebar-open' : ''}`}>
       <div className="brand"><div className="brand-mark">✓</div><div><strong>apply<span>track</span></strong><small>job search, in focus</small></div><button className="mobile-close icon-button" aria-label="Close navigation" onClick={close}><X size={18} /></button></div>
-      <button className="add-button" onClick={openCreate}><Plus size={17} strokeWidth={2.5} /><span>Add application</span><kbd>⌘ N</kbd></button>
+      <button className="add-button" onClick={openCreate}><Plus size={17} strokeWidth={2.5} /><span>Add application</span><kbd>{shortcutModifier} N</kbd></button>
       <nav className="nav-list" aria-label="Main navigation">
         <span className="nav-label">Workspace</span>
         {navItems.map(({ id, label, icon: Icon, badge }) => <button key={id} className={`nav-item ${view === id ? 'active' : ''}`} onClick={() => { setView(id); close() }}><Icon size={18} /><span>{label}</span>{badge && <em>{badge}</em>}</button>)}
@@ -338,12 +427,23 @@ function ConversionMetric({ label, value, percent, color }: { label: string; val
   return <div className="conversion-metric"><div className="conversion-label"><span className="stage-dot" style={{ background: color }} />{label}</div><strong>{value}</strong><small>{percent}% of previous</small></div>
 }
 
-function Settings({ theme, setTheme, onReset }: { theme: 'light' | 'dark'; setTheme: (theme: 'light' | 'dark') => void; onReset: () => void }) {
+function LegacySettings({ theme, setTheme, onReset }: { theme: 'light' | 'dark'; setTheme: (theme: 'light' | 'dark') => void; onReset: () => void }) {
   const [resetting, setResetting] = useState(false)
   const reset = async () => { setResetting(true); await onReset(); setResetting(false) }
   return <>
     <section className="page-heading"><div><p className="eyebrow">Workspace / Settings</p><h1>Settings</h1><p className="subtitle">Make ApplyTrack feel like yours.</p></div></section>
     <div className="settings-grid"><section className="section-block settings-card"><div className="section-heading"><div><h2>Appearance</h2><p>Choose how your workspace looks.</p></div></div><div className="setting-row"><div><strong>Color theme</strong><span>Light is crisp, dark is easy on the eyes.</span></div><div className="theme-toggle" role="group" aria-label="Color theme"><button className={theme === 'light' ? 'active' : ''} onClick={() => setTheme('light')}><Sun size={15} /> Light</button><button className={theme === 'dark' ? 'active' : ''} onClick={() => setTheme('dark')}><Moon size={15} /> Dark</button></div></div></section><section className="section-block settings-card"><div className="section-heading"><div><h2>Local workspace</h2><p>Your data stays in this browser.</p></div><div className="privacy-badge"><WifiOff size={14} /> Offline ready</div></div><div className="setting-row"><div><strong>Reset demo data</strong><span>Restore the original ApplyTrack examples.</span></div><button className="secondary-button" onClick={() => void reset()} disabled={resetting}><RotateCcw size={15} className={resetting ? 'spin' : ''} /> {resetting ? 'Restoring…' : 'Restore data'}</button></div></section><section className="section-block settings-card"><div className="section-heading"><div><h2>Account</h2><p>Your profile for this workspace.</p></div></div><div className="account-row"><div className="profile-avatar large">JD</div><div><strong>Jordan Davis</strong><span>jordan@example.com</span></div><button className="secondary-button small-button">Edit profile</button></div></section></div>
+  </>
+}
+
+function Settings({ theme, setTheme, user, onReset }: { theme: 'light' | 'dark'; setTheme: (theme: 'light' | 'dark') => void; user: { name: string; email: string } | null; onReset: () => void }) {
+  const [resetting, setResetting] = useState(false)
+  const reset = async () => { setResetting(true); await onReset(); setResetting(false) }
+  const displayName = user?.name ?? 'Jordan Davis'
+  const displayEmail = user?.email ?? 'Product designer'
+  return <>
+    <section className="page-heading"><div><p className="eyebrow">Workspace / Settings</p><h1>Settings</h1><p className="subtitle">Make ApplyTrack feel like yours.</p></div></section>
+    <div className="settings-grid"><section className="section-block settings-card"><div className="section-heading"><div><h2>Appearance</h2><p>Choose how your workspace looks.</p></div></div><div className="setting-row"><div><strong>Color theme</strong><span>Light is crisp, dark is easy on the eyes.</span></div><div className="theme-toggle" role="group" aria-label="Color theme"><button className={theme === 'light' ? 'active' : ''} onClick={() => setTheme('light')}><Sun size={15} /> Light</button><button className={theme === 'dark' ? 'active' : ''} onClick={() => setTheme('dark')}><Moon size={15} /> Dark</button></div></div></section><section className="section-block settings-card"><div className="section-heading"><div><h2>Local workspace</h2><p>Your data stays in this browser.</p></div><div className="privacy-badge"><WifiOff size={14} /> Offline ready</div></div><div className="setting-row"><div><strong>Reset demo data</strong><span>Restore the original ApplyTrack examples.</span></div><button className="secondary-button" onClick={() => void reset()} disabled={resetting}><RotateCcw size={15} className={resetting ? 'spin' : ''} /> {resetting ? 'Restoring…' : 'Restore data'}</button></div></section><section className="section-block settings-card"><div className="section-heading"><div><h2>Account</h2><p>Your profile for this workspace.</p></div></div><div className="account-row"><div className="profile-avatar large">{initials(displayName)}</div><div><strong>{displayName}</strong><span>{displayEmail}</span></div><button className="secondary-button small-button" type="button">Edit profile</button></div></section></div>
   </>
 }
 

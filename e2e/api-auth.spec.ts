@@ -8,7 +8,11 @@ test('registers a real account and opens the protected workspace', async ({ page
   await expect(page.getByRole('heading', { name: 'Create your workspace' })).toBeVisible()
   await page.getByPlaceholder('Jordan Davis').fill('Playwright User')
   await page.getByPlaceholder('you@example.com').fill(email)
-  await page.getByPlaceholder('8+ characters').fill('applytrack-e2e')
+  const password = page.getByPlaceholder('8+ characters')
+  await password.fill('short')
+  await expect(page.getByText('Weak', { exact: true })).toBeVisible()
+  await password.fill('ApplyTrack9!')
+  await expect(page.getByText('Strong', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: /Create account/i }).click()
   await expect(page.getByRole('heading', { name: /Good morning, Playwright/i })).toBeVisible()
   await expect(page.getByText('Your pipeline')).toBeVisible()
@@ -24,4 +28,14 @@ test('registers a real account and opens the protected workspace', async ({ page
   await page.waitForTimeout(800)
   await page.reload()
   await expect(page.getByText('API Company', { exact: true })).toBeVisible()
+})
+
+test('backend rejects invalid registration data and protects the workspace', async ({ request }) => {
+  const invalidRegistration = await request.post('http://127.0.0.1:4000/api/auth/register', {
+    data: { name: 'A', email: `invalid-${Date.now()}@example.com`, password: 'short' },
+  })
+  expect(invalidRegistration.status()).toBe(400)
+
+  const protectedWorkspace = await request.get('http://127.0.0.1:4000/api/workspace')
+  expect(protectedWorkspace.status()).toBe(401)
 })
